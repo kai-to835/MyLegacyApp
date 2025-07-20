@@ -1,0 +1,236 @@
+<!DOCTYPE html>
+<html lang="ja">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>呼吸アニメーション</title>
+  <style>
+    body {
+      margin: 0;
+      background-color: black;
+      overflow: hidden;
+    }
+
+    canvas {
+      display: block;
+    }
+  </style>
+</head>
+
+<body>
+  <canvas id="breathCanvas"></canvas>
+  <script>
+    const canvas = document.getElementById('breathCanvas');
+    const ctx = canvas.getContext('2d');
+    let w, h;
+    function resize() {
+      w = canvas.width = window.innerWidth;
+      h = canvas.height = window.innerHeight;
+    }
+    window.addEventListener('resize', resize);
+    resize();
+
+    const latSegments = 24;
+    const lonSegments = 48;
+    const sphereDots = [];
+    for (let i = 0; i <= latSegments; i++) {
+      const theta = (i / latSegments) * Math.PI;
+      for (let j = 0; j < lonSegments; j++) {
+        const phi = (j / lonSegments) * 2 * Math.PI;
+        sphereDots.push({theta, phi});
+      }
+    }
+
+    function easeInOutSine(x) {
+      return -(Math.cos(Math.PI * x) - 1) / 2;
+    }
+    function variedEase(x) {
+      return 0.5 * (1 - Math.cos(Math.PI * x + 0.2 * Math.sin(3 * Math.PI * x)));
+    }
+
+    let prevLabel = '';
+    let labelOpacity = 0;
+    let labelPhase = 'fadeIn';
+    let labelSwitchTime = 0;
+    let globalStartTime = null;
+    let rotationStartTime = null;
+
+    function drawScene(timestamp) {
+      if (!globalStartTime) globalStartTime = timestamp;
+      const globalT = (timestamp - globalStartTime) / 1000;
+      const countdownDuration = 4;
+      const cx = w / 2;
+      const cy = h / 2;
+      const orbitRadius = Math.min(w, h) * 0.2;
+      const radiusBase = Math.min(w, h) * 0.18;
+
+      ctx.clearRect(0, 0, w, h);
+
+      let phase = '', scale = 1, fade = 1;
+      let targetLabel = '';
+      let rotX = 0, rotY = 0, rotZ = 0;
+
+      if (globalT < countdownDuration) {
+        const x = globalT / countdownDuration;
+        scale = 1 - 0.3 * easeInOutSine(x);
+        fade = x;
+        targetLabel = (4 - Math.floor(globalT)).toString();
+        labelOpacity = easeInOutSine(x);
+        labelPhase = 'fadeIn';
+        prevLabel = targetLabel;
+
+        rotX = 0.2 * Math.sin(globalT * 0.8);
+        rotY = 0.3 * Math.cos(globalT * 1.0);
+        rotZ = 0.1 * Math.sin(globalT * 1.5);
+
+      } else {
+        const breathT = globalT - countdownDuration;
+        const cycleTime = 14;
+        const p = breathT % cycleTime;
+
+        if (!rotationStartTime) rotationStartTime = timestamp;
+        const t = Math.max(0, timestamp - rotationStartTime) / 1000;
+        const angleProgress = easeInOutSine(Math.min(t / 2, 1));
+
+        rotX = angleProgress * t * 0.3;
+        rotY = angleProgress * t * 0.5;
+        rotZ = angleProgress * t * 0.2;
+
+        if (p < 4) {
+          const x = p / 4;
+          scale = 1 + variedEase(x) * 0.8;
+          targetLabel = 'breathe in';
+          fade = easeInOutSine(x);
+        } else if (p < 8) {
+          scale = 1.8;
+          targetLabel = 'hold your breath';
+          fade = 1;
+        } else {
+          const x = (p - 8) / 6;
+          scale = 1.8 - variedEase(x) * 0.9;
+          targetLabel = 'breathe out';
+          fade = 1 - easeInOutSine(x);
+        }
+
+        if (targetLabel !== prevLabel) {
+          if (labelPhase === 'fadeIn') {
+            labelPhase = 'fadeOut';
+            labelSwitchTime = timestamp;
+          }
+        }
+
+        if (labelPhase === 'fadeOut') {
+          const elapsed = (timestamp - labelSwitchTime) / 300;
+          labelOpacity = Math.max(1 - elapsed, 0);
+          if (labelOpacity <= 0) {
+            labelPhase = 'fadeIn';
+            prevLabel = targetLabel;
+            labelSwitchTime = timestamp;
+          }
+        } else if (labelPhase === 'fadeIn') {
+          const elapsed = (timestamp - labelSwitchTime) / 300;
+          labelOpacity = Math.min(elapsed, 1);
+        }
+      }
+
+      // ガイド円
+      ctx.beginPath();
+      ctx.arc(cx, cy, radiusBase * 1.0, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      ctx.beginPath();
+      ctx.arc(cx, cy, radiusBase * 1.8, 0, Math.PI * 2);
+      ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+      ctx.stroke();
+
+      // 軌道
+      ctx.beginPath();
+      ctx.arc(cx, cy, orbitRadius, 0, Math.PI * 2);
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 6;
+      ctx.stroke();
+
+      // 軌道上のマーク
+      const marks = [0, 4, 8];
+      for (let m of marks) {
+        const angle = ((m / 14) * 2 * Math.PI) - Math.PI / 2;
+        const mx = cx + orbitRadius * Math.cos(angle);
+        const my = cy + orbitRadius * Math.sin(angle);
+        ctx.beginPath();
+        ctx.arc(mx, my, 6, 0, Math.PI * 2);
+        ctx.fillStyle = 'black';
+        ctx.fill();
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+      }
+
+      // 格子点描画（波のゆらぎ付き）
+      const pointsToDraw = [];
+      for (let dot of sphereDots) {
+        let x = Math.sin(dot.theta) * Math.cos(dot.phi);
+        let y = Math.sin(dot.theta) * Math.sin(dot.phi);
+        let z = Math.cos(dot.theta);
+
+        // 波のゆらぎを z に加算
+        const waveAmplitude = 0.08;
+        const waveFreq = 2;
+        const timeFactor = globalT + dot.phi;
+        z += waveAmplitude * Math.sin(waveFreq * timeFactor + dot.theta * 3);
+
+        let tempX = x, tempY = y, tempZ = z;
+        y = tempY * Math.cos(rotX) - tempZ * Math.sin(rotX);
+        z = tempY * Math.sin(rotX) + tempZ * Math.cos(rotX);
+        tempY = y; tempZ = z;
+
+        x = tempX * Math.cos(rotY) + tempZ * Math.sin(rotY);
+        z = -tempX * Math.sin(rotY) + tempZ * Math.cos(rotY);
+        tempX = x; tempZ = z;
+
+        x = tempX * Math.cos(rotZ) - tempY * Math.sin(rotZ);
+        y = tempX * Math.sin(rotZ) + tempY * Math.cos(rotZ);
+
+        const perspective = 400 / (4 - z);
+        const radius = radiusBase * scale;
+        const drawX = cx + x * radius * perspective / 100;
+        const drawY = cy + y * radius * perspective / 100;
+        pointsToDraw.push({x: drawX, y: drawY, z});
+      }
+
+      pointsToDraw.sort((a, b) => a.z - b.z);
+      for (let p of pointsToDraw) {
+        ctx.beginPath();
+        ctx.arc(p.x, p.y, 1.5, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.fill();
+      }
+
+      // テキスト
+      ctx.font = '40px sans-serif';
+      ctx.fillStyle = `rgba(255,255,255,${labelOpacity.toFixed(2)})`;
+      ctx.textAlign = 'center';
+      ctx.fillText(prevLabel, cx, cy + radiusBase * 2.8);
+
+      // --- 最後に黒丸を描画して最前面に ---
+      const tSinceStart = Math.max(0, timestamp - (rotationStartTime || timestamp)) / 1000;
+      const blackAngle = (tSinceStart / 14) * 2 * Math.PI - Math.PI / 2;
+      const px = cx + orbitRadius * Math.cos(blackAngle);
+      const py = cy + orbitRadius * Math.sin(blackAngle);
+      ctx.beginPath();
+      ctx.arc(px, py, 12, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(0,0,0,${fade.toFixed(2)})`;
+      ctx.fill();
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      requestAnimationFrame(drawScene);
+    }
+
+    requestAnimationFrame(drawScene);
+  </script>
+</body>
+
+</html>
